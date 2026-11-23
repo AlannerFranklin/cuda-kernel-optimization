@@ -133,4 +133,4 @@ build\histogram\histogram.exe
 build\softmax\softmax.exe
 ```
 
-ncu 数据（Speed of Light、DRAM 字节数）的采集方法见 [ncu/README.md](ncu/README.md)。
+ncu 数据（计算/DRAM 吞吐、sector 有效率、DRAM 字节数）见 [ncu/summary.md](ncu/summary.md)，采集方法见 [ncu/README.md](ncu/README.md)。
