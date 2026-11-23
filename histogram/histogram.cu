@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
 
     printf("------------------------------------------------------------------\n");
     printf("N = %d (%.1f MB)   峰值 672 GB/s\n", N, (double)N * sizeof(int) / 1e6);
-    printf("naive 慢是因为 %d 次原子加打在 256 个全局地址上\n", N);
+    printf("naive 慢是因为 %d 次原子加打在 256 个全局地址上 \n", N);
 
     delete[] h_a;
     delete[] h_out;

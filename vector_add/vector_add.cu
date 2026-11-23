@@ -149,6 +149,13 @@ int main(int argc, char** argv) {
     }
     CUDA_CHECK(cudaEventDestroy(s0));
     CUDA_CHECK(cudaEventDestroy(s1));
+
+    // ⚠️ saxpy 是【非幂等】的（y = a*x + y），而 bench 会 launch 4 次。
+    //    检查前必须先把 d_b 复位、再单独跑一次；否则读到的是累加 4 次后的值（10 而非 4）。
+    //    这是「kernel 与 harness 的幂等契约」的又一个实例（同 reduction_v6 的 atomicAdd）。
+    CUDA_CHECK(cudaMemcpy(d_b, h_b, (size_t)N * sizeof(float), cudaMemcpyHostToDevice));
+    saxpy<<<grid, block>>>(2.0f, d_a, d_b, N);
+    CUDA_CHECK_LAUNCH();
     CUDA_CHECK(cudaMemcpy(h_c, d_b, (size_t)N * sizeof(float), cudaMemcpyDeviceToHost));
     bool ok_saxpy = (h_c[0] == 4.0f);            // y = 2*1 + 2 = 4
     printf("%-24s %10.6f %10.1f %8.2fx %7s\n",
@@ -156,9 +163,9 @@ int main(int argc, char** argv) {
            ok_saxpy ? "OK" : "FAIL");
 
     printf("----------------------------------------------------------------\n");
-    printf("N = %d (%.1f MB/array)   峰值 672 GB/s（RTX 4070 Ti Super）\n",
+    printf("N = %d (%.1f MB/array)   峰值 672 GB/s（RTX 4070 Ti Super） \n",
            N, (double)N * sizeof(float) / 1e6);
-    printf("coalesced / strided = %.2f 倍 —— 有效带宽的差距\n", t_str / t_coal);
+    printf("coalesced / strided = %.2f 倍 —— 有效带宽的差距 \n", t_str / t_coal);
 
     delete[] h_a;
     delete[] h_b;

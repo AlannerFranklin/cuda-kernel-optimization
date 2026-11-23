@@ -323,7 +323,7 @@ int main(int argc, char** argv) {
     int N = argc > 1 ? atoi(argv[1]) : 16777216;
 
     if (N % 1024 != 0) {
-        printf("N 必须是 1024 的倍数（v2 以后每 block 处理 1024 个元素）\n");
+        printf("N 必须是 1024 的倍数（v2 以后每 block 处理 1024 个元素） \n");
         return 1;
     }
 
@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
     }
 
     printf("------------------------------------------------------------------------\n");
-    printf("N = %d (%.1f MB)   峰值带宽 672 GB/s（RTX 4070 Ti Super）\n",
+    printf("N = %d (%.1f MB)   峰值带宽 672 GB/s（RTX 4070 Ti Super） \n",
            N, (double)N * sizeof(float) / 1e6);
 
     delete[] h_a;

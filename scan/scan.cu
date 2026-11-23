@@ -287,11 +287,14 @@ static float bench_v0(int N, float* d_a, float* d_out) {
 
 // v1/v2/v3：三次启动包在一个计时窗口里
 static float bench_three(void (*local)(float*, float*, float*, int),
-                         int N, int nBlocks, int elemsPerBlock,
+                         int N, int /*unused*/, int elemsPerBlock,
                          float* d_a, float* d_out, float* d_bs)
 {
     dim3 block(TILE);
-    dim3 grid(nBlocks);
+    // ⚠️ block 数必须由【本版本的每块元素数】决定，不能用 v3 的 N/BLOCK_ELEMS：
+    //    v1/v2 每块只处理 TILE 个元素，用少了会只覆盖前 1/4 的数据。
+    const int nb = N / elemsPerBlock;
+    dim3 grid(nb);
 
     cudaEvent_t s0 = nullptr, s1 = nullptr;
     CUDA_CHECK(cudaEventCreate(&s0));
@@ -303,7 +306,7 @@ static float bench_three(void (*local)(float*, float*, float*, int),
         if (rep != 0) CUDA_CHECK(cudaEventRecord(s0));
 
         local<<<grid, block>>>(d_a, d_out, d_bs, N);
-        scan_offsets<<<1, nBlocks>>>(d_bs, nBlocks);
+        scan_offsets<<<1, nb>>>(d_bs, nb);
         scan_add<<<grid, block>>>(d_out, d_bs, elemsPerBlock);
 
         if (rep != 0) {
@@ -349,12 +352,15 @@ int main(int argc, char** argv) {
     int N = argc > 1 ? atoi(argv[1]) : 262144;
 
     if (N % BLOCK_ELEMS != 0) {
-        printf("N 必须是 %d 的倍数\n", BLOCK_ELEMS);
+        printf("N 必须是 %d 的倍数 \n", BLOCK_ELEMS);
         return 1;
     }
-    int nBlocks = N / BLOCK_ELEMS;
-    if (nBlocks > 1024) {
-        printf("nBlocks = %d > 1024，scan_offsets 单 block 扫不完\n", nBlocks);
+    // ⚠️ 各版本的 block 数不同：v1/v2 每 block 处理 TILE 个元素，v3 处理 BLOCK_ELEMS 个。
+    //    按【最小的每块元素数】定上限和 buffer 大小，否则 v1/v2 的 grid 不够、覆盖不全。
+    int nBlocks   = N / BLOCK_ELEMS;   // v3 的 block 数
+    int maxBlocks = N / TILE;          // v1/v2 的 block 数（每块元素更少 → block 更多）
+    if (maxBlocks > 1024) {
+        printf("maxBlocks = %d > 1024，scan_offsets 单 block 扫不完 \n", maxBlocks);
         return 1;
     }
 
@@ -369,7 +375,7 @@ int main(int argc, char** argv) {
     float* d_bs  = nullptr;
     CUDA_CHECK(cudaMalloc((void**)&d_a,   (size_t)N * sizeof(float)));
     CUDA_CHECK(cudaMalloc((void**)&d_out, (size_t)N * sizeof(float)));
-    CUDA_CHECK(cudaMalloc((void**)&d_bs,  (size_t)nBlocks * sizeof(float)));
+    CUDA_CHECK(cudaMalloc((void**)&d_bs,  (size_t)maxBlocks * sizeof(float)));
     CUDA_CHECK(cudaMemcpy(d_a, h_a, (size_t)N * sizeof(float), cudaMemcpyHostToDevice));
 
     const double bytes = 2.0 * N * sizeof(float);     // 读一遍 + 写一遍
@@ -409,7 +415,7 @@ int main(int argc, char** argv) {
 
     printf("------------------------------------------------------------------\n");
     printf("N = %d    nBlocks = %d    峰值 672 GB/s\n", N, nBlocks);
-    printf("v0 是分段前缀和（block 间不传递），其余三版是全局\n");
+    printf("v0 是分段前缀和（block 间不传递），其余三版是全局 \n");
 
     delete[] h_a;
     delete[] h_out;

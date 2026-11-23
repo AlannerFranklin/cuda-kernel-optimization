@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
     int N = argc > 1 ? atoi(argv[1]) : 4096;
 
     if (N % 256 != 0) {
-        printf("N 必须是 256 的倍数\n");
+        printf("N 必须是 256 的倍数 \n");
         return 1;
     }
 

@@ -119,7 +119,7 @@ v0 是**分段**前缀和（block 之间不传递），v1 用三个 kernel 修�
 **8×8 的 occupancy 只有 33%，却比 83% 的 4×4 快 1.78 倍**——
 occupancy 不直接决定性能，每 FMA 配多少 load 才是。
 
-详细的瓶颈分析见 [matmul 的 notes](docs/)（后续补上 ncu 截图）。
+详细的瓶颈分析与全部实测数据见 [docs/perf-report.md](docs/perf-report.md)（含 Roofline 表）；ncu 采集方法与判读见 [docs/ncu/README.md](docs/ncu/README.md)。
 
 ### [histogram](histogram/) —— 37.7x，达峰值 87%
 
