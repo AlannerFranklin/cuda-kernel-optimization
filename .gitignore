@@ -36,3 +36,6 @@ out/
 out*.txt
 ~$*
 scratch/
+
+# SASS 反汇编输出
+sass*.txt
