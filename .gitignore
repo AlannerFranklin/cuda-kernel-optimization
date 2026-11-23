@@ -1,0 +1,38 @@
+# ===== 构建产物 =====
+build/
+out/
+*.obj
+*.exe
+*.lib
+*.dll
+*.exp
+*.pdb
+*.ilk
+
+# 编译中间产物
+*.i
+*.asm
+*.s
+*.o
+*.a
+
+# CUDA 编译中间产物
+*.ptx
+*.cubin
+*.fatbin
+
+# ===== IDE =====
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.vsconfig
+.claude/
+
+# ===== 临时文件 =====
+*.tmp
+*.log
+out*.txt
+~$*
+scratch/
