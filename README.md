@@ -23,26 +23,43 @@ build\matmul\matmul.exe 4096           :: 带参数
 
 ## 性能总表
 
-> ⚠️ 下表正在用一次统一运行刷新。各课题的开发过程中分散测过多次，
-> 机器状态（时钟、后台负载、PCIe 链路）有波动，跨课题的绝对值不宜直接比较。
+> 下表是一次**统一运行**的结果（2026-11-23 晚，RTX 4070 Ti Super + CUDA 12.6）。
+> 全部规模都**大于 48 MB 的 L2**，测的是真 DRAM。
+> 完整数据与判读见 [docs/perf-report.md](docs/perf-report.md) 和 [docs/ncu/summary.md](docs/ncu/summary.md)。
 
-| 课题 | 最佳版本 | 关键数字 | 相对基线 |
-|---|---|---|---|
-| **vector_add** | coalesced | ~1744 GB/s（L2 常驻，N=1M） | — |
-| | strided | ~154 GB/s | **11.3x 慢**——访存不合并的代价 |
-| **reduction** | v6 单 kernel | 0.119 → 0.023 ms | **5.8x** |
-| **scan** | v3 每线程 4 元素 | 0.0092 → 0.0143 ms | — |
-| **matmul** | reg 8×8 | 2,338 → **22,570 GFLOPS** | **9.7x**（占 FP32 峰值 51%） |
-| **histogram** | shared + grid-stride | 15.5 → **585.1 GB/s** | **37.7x**（占峰值 87%） |
-| **softmax** | block 归约 | **607.6 GB/s**（M=16384 × N=1024） | 占峰值 **90%** |
+| 课题 | 版本跨度 | 最佳性能 | 峰值占比 | 加速比 |
+|---|---|---|---|---|
+| **vector_add** | 合并 → 散开 | 620.3 GB/s / 128.1 GB/s | 92% / 19% | **4.84x** |
+| **reduction** | v0 → v6（七版） | 350.5 → 618.3 GB/s | 92% | **1.76x** |
+| **scan** | v0 → v3（四版） | 186.2 → 157.5 GB/s | 28% | 见下 |
+| **matmul** | naive → reg8x8 | 2,258 → **20,305 GFLOPS** | **46%** | **8.99x** |
+| **histogram** | naive → shared | 12.9 → **595.8 GB/s** | **89%** | **46.1x** |
+| **softmax** | 单版 | **627.1 GB/s** | **93%** | — |
 
-**几个值得单独说的数字：**
+**几个值得单独说的：**
 
-- `softmax` 达到 DRAM 峰值的 **90%**，`histogram` 是 **87%**——两个都基本到顶了
-- `softmax` 的两项检查（每行总和 = 1、逐元素对比）都是**零误差**
-- `matmul` 的 8×8 版 **AI = 115.5**，跨过 ridge point 65.6，是四版里唯一进入
-  compute-bound 区的
-- 32 路 bank conflict 实测比无冲突慢 **18.3 倍**（见下）
+**① 归约只快了 1.76x，不是 5.8x——这是一个自我纠正**
+
+早期在 N=41.9 MB（**小于 L2 的 48 MB**）上测出 5.8x。换成 67.1 MB 之后只有 1.76x。
+
+原因：从 v2 起就撞上了 DRAM 带宽上限（618 GB/s = 峰值的 92%），**后面几版没有空间可赚**。
+那个 5.8x 是「数据在缓存里」时的数字，不是真实场景。
+
+> **这条本身就是一课：同一个 kernel，数据放不放得进 L2，测出来的「加速比」可以差三倍。**
+
+**② softmax 93%、histogram 89%、vector_add 92%——三个都基本到顶了**
+
+再优化也没有空间，**识别「这个已经到极限」和识别「这里还能优化 10 倍」一样重要**。
+
+**③ matmul 的 8×8 只占峰值 46%，但它是唯一进入 compute-bound 区的**
+
+AI = 115.5，跨过 ridge point 65.6。前三个版本都在 memory-bound 区。
+
+**④ 32 路 bank conflict 实测比无冲突慢 18.3 倍**（见下面的微基准）
+
+**⑤ ncu 里最反直觉的一条：naive matmul 的计算吞吐 95%，却只有 5% 的 FP32 峰值**
+
+SM 几乎满载——但满载在**发访存指令**上，不是在算。这正是 register tiling 的动机。
 
 ## 各课题
 
@@ -55,8 +72,13 @@ int i = blockIdx.x * blockDim.x + threadIdx.x;                    // 合并：wa
 int i = threadIdx.x * gridDim.x + blockIdx.x;                     // 散开：warp 读 32 个不同 cache line
 ```
 
-实测差 **11.3 倍**。ncu 的对应指标是
-`smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct`：
+在 **67 MB（超过 L2）** 的规模下实测差 **4.84 倍**（620.3 vs 128.1 GB/s）。
+
+> ⚠️ 但同一个实验在 **12 MB（L2 常驻）** 的规模下测出来是 **11.3 倍**。
+> **同一现象，两级存储，两个数字**——散开访问在 L2 内部浪费得更彻底，
+> 到了 DRAM 反而被行激活/预充电掩盖了一部分。**比较加速比之前，先确认数据落在哪一级。**
+
+ncu 的对应指标是 `smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct`：
 
 | 版本 | 每个 sector 用到的字节 |
 |---|---|
@@ -65,7 +87,7 @@ int i = threadIdx.x * gridDim.x + blockIdx.x;                     // 散开：wa
 
 100 / 12.5 = **8 倍流量膨胀**，由 profiler 直接量出。
 
-### [reduction](reduction/) —— 七个版本，5.8x
+### [reduction](reduction/) —— 七个版本，1.76x
 
 | 版本 | 做法 | 解决的问题 |
 |---|---|---|
@@ -99,14 +121,16 @@ v0 是**分段**前缀和（block 之间不传递），v1 用三个 kernel 修�
 **坑**：Hillis-Steele 产出的是包含式，对拍要的是排除式——整体错一位。
 用 `__shfl_up_sync(x, 1)` 往回挪一个 lane 即可，lane 0 取本 warp 的独占偏移。
 
-### [matmul](matmul/) —— 四版，9.7x
+### [matmul](matmul/) —— 四版，8.99x
 
 | 版本 | 每线程输出 | 每 FMA 的 load | GFLOPS | 峰值占比 | Roofline |
 |---|---|---|---|---|---|
-| naive | 1 | 2.0（global） | 2,338 | 5.3% | memory-bound |
-| tiled | 1 | 2.0（shared） | 3,016 | 6.8% | memory-bound |
-| reg 4×4 | 16 | 0.5 | 12,677 | 28.7% | memory-bound |
-| reg 8×8 | 64 | **0.25** | **22,570** | **51%** | **compute-bound** |
+| naive | 1 | 2.0（global） | 2,258 | 5.1% | memory-bound |
+| tiled | 1 | 2.0（shared） | 2,946 | 6.7% | memory-bound |
+| reg 4×4 | 16 | 0.5 | 13,309 | 30.2% | memory-bound |
+| reg 8×8 | 64 | **0.25** | **20,305** | **46.0%** | **compute-bound** |
+
+> N = 4096，min_ms：60.85 / 46.66 / 10.33 / 6.77。
 
 **四版在 Roofline 上走了一条完整的路线**，8×8 是唯一跨过 ridge point（65.6）的：
 
@@ -122,11 +146,11 @@ occupancy 不直接决定性能，每 FMA 配多少 load 才是。
 
 详细的瓶颈分析与全部实测数据见 [docs/perf-report.md](docs/perf-report.md)（含 Roofline 表）；ncu 采集方法与判读见 [docs/ncu/README.md](docs/ncu/README.md)。
 
-### [histogram](histogram/) —— 37.7x，达峰值 87%
+### [histogram](histogram/) —— 46.1x，达峰值 89%
 
 ```
-naive    15.5 GB/s    1600 万次原子加，全部打在 256 个全局地址上
-shared  585.1 GB/s    私有直方图 + grid-stride（1024 blocks）+ 跳过空 bin
+naive    12.9 GB/s    1677 万次原子加，全部打在 256 个全局地址上
+shared  595.8 GB/s    私有直方图 + grid-stride（1024 blocks）+ 跳过空 bin
 ```
 
 **只加 shared 是没用的**：65536 个 block × 256 次合并 = 1677 万次全局原子加，一次没少。
