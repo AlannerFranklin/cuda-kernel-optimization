@@ -34,11 +34,12 @@ build\matmul\matmul.exe 4096           :: 带参数
 | **scan** | v3 每线程 4 元素 | 0.0092 → 0.0143 ms | — |
 | **matmul** | reg 8×8 | 2,338 → **22,570 GFLOPS** | **9.7x**（占 FP32 峰值 51%） |
 | **histogram** | shared + grid-stride | 15.5 → **585.1 GB/s** | **37.7x**（占峰值 87%） |
-| **softmax** | block 归约 | 待测 | — |
+| **softmax** | block 归约 | **607.6 GB/s**（M=16384 × N=1024） | 占峰值 **90%** |
 
 **几个值得单独说的数字：**
 
-- `histogram` 的 shared 版达到 DRAM 峰值的 **87%**，基本到顶了
+- `softmax` 达到 DRAM 峰值的 **90%**，`histogram` 是 **87%**——两个都基本到顶了
+- `softmax` 的两项检查（每行总和 = 1、逐元素对比）都是**零误差**
 - `matmul` 的 8×8 版 **AI = 115.5**，跨过 ridge point 65.6，是四版里唯一进入
   compute-bound 区的
 - 32 路 bank conflict 实测比无冲突慢 **18.3 倍**（见下）
